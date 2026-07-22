@@ -14,6 +14,8 @@ from datasets.dataset_config import dataset_config
 from last_layer_analysis import last_layer_analysis
 from networks import tvmodels, allmodels, set_tvmodel_head_var
 
+def list_of_floats(arg):
+    return list(map(float, arg.split(',')))
 
 def main(argv=None):
     tstart = time.time()
@@ -67,6 +69,8 @@ def main(argv=None):
     parser.add_argument('--nepochs', default=200, type=int, required=False,
                         help='Number of epochs per training session (default=%(default)s)')
     parser.add_argument('--lr', default=0.1, type=float, required=False,
+                        help='Starting learning rate (default=%(default)s)')
+    parser.add_argument('--known_lr', default=[], type=list_of_floats, required=False,
                         help='Starting learning rate (default=%(default)s)')
     parser.add_argument('--lr-min', default=1e-4, type=float, required=False,
                         help='Minimum learning rate (default=%(default)s)')
@@ -259,6 +263,10 @@ def main(argv=None):
                 setattr(appr, tradeoff_name, best_tradeoff)
 
             print('-' * 108)
+        
+        if len(args.known_lr)>0:
+            print('Applying supplied lr:', args.known_lr[t])
+            appr.lr = args.known_lr[t]
 
         # Train
         appr.train(t, trn_loader[t], val_loader[t])

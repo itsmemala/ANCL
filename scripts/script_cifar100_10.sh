@@ -11,8 +11,10 @@ else
     echo "No gpu has been assigned."
 fi
 
-PROJECT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && cd .. && pwd )"
-SRC_DIR="$PROJECT_DIR/src"
+#PROJECT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && cd .. && pwd )"
+#SRC_DIR="$PROJECT_DIR/src"
+PROJECT_DIR="/content/gdrive/MyDrive/fabr_data/SCL/ANCL"
+SRC_DIR="/content/ANCL/src"
 echo "Project dir: $PROJECT_DIR"
 echo "Sources dir: $SRC_DIR"
 
@@ -24,28 +26,28 @@ else
 fi
 echo "Results dir: $RESULTS_DIR"
 
-for SEED in 0 1 2 3 4
+for SEED in 0 1 2
 do
   if [ "$3" = "base" ]; then
           PYTHONPATH=$SRC_DIR python3 -u $SRC_DIR/main_incremental.py --exp-name base_${SEED}\
-                 --datasets cifar100_icarl --num-tasks 10 --network resnet32 --seed $SEED \
+                 --datasets cifar100_icarl --num-tasks 2 --network resnet32 --seed $SEED \
                  --nepochs 200 --batch-size 128 --results-path $RESULTS_DIR \
-                --gridsearch-tasks 10 --gridsearch-config gridsearch_config \
+                --gridsearch-tasks 2 --gridsearch-config gridsearch_config \
                  --gridsearch-acc-drop-thr 0.2 --gridsearch-hparam-decay 0.5 \
                  --approach $1 --gpu $2
   elif [ "$3" = "fixd" ]; then
           PYTHONPATH=$SRC_DIR python3 -u $SRC_DIR/main_incremental.py --exp-name fixd_${SEED} \
-                 --datasets cifar100_icarl --num-tasks 10 --network resnet32 --seed $SEED \
+                 --datasets cifar100_icarl --num-tasks 2 --network resnet32 --seed $SEED \
                  --nepochs 200 --batch-size 128 --results-path $RESULTS_DIR \
-                 --gridsearch-tasks 10 --gridsearch-config gridsearch_config \
+                 --gridsearch-tasks 2 --gridsearch-config gridsearch_config \
                  --gridsearch-acc-drop-thr 0.2 --gridsearch-hparam-decay 0.5 \
                  --approach $1 --gpu $2 \
                  --num-exemplars 2000 --exemplar-selection herding
   elif [ "$3" = "grow" ]; then
           PYTHONPATH=$SRC_DIR python3 -u $SRC_DIR/main_incremental.py --exp-name grow_${SEED} \
-                 --datasets cifar100_icarl --num-tasks 10 --network resnet32 --seed $SEED \
+                 --datasets cifar100_icarl --num-tasks 2 --network resnet32 --seed $SEED \
                  --nepochs 200 --batch-size 128 --results-path $RESULTS_DIR \
-                 --gridsearch-tasks 10 --gridsearch-config gridsearch_config \
+                 --gridsearch-tasks 2 --gridsearch-config gridsearch_config \
                  --gridsearch-acc-drop-thr 0.2 --gridsearch-hparam-decay 0.5 \
                  --approach $1 --gpu $2 \
                  --num-exemplars-per-class 20 --exemplar-selection herding
