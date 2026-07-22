@@ -217,10 +217,15 @@ def main(argv=None):
     # GridSearch
     if args.gridsearch_tasks > 0:
         ft_kwargs = {**base_kwargs, **dict(logger=logger,
-                                           exemplars_dataset=GridSearch_ExemplarsDataset(transform, class_indices))}
+                                            exemplars_dataset=GridSearch_ExemplarsDataset(transform, class_indices))}
         appr_ft = Appr_finetuning(net, device, **ft_kwargs)
         gridsearch = GridSearch(appr_ft, args.seed, gs_args.gridsearch_config, gs_args.gridsearch_acc_drop_thr,
                                 gs_args.gridsearch_hparam_decay, gs_args.gridsearch_max_num_searches)
+    else:
+        ft_kwargs = {**base_kwargs, **dict(logger=logger,
+                                            exemplars_dataset=GridSearch_ExemplarsDataset(transform, class_indices))}
+        appr_ft = Appr_finetuning(net, device, **ft_kwargs)
+        gridsearch = GridSearch(appr_ft, args.seed)
 
     # Loop tasks
     print(taskcla)
@@ -267,6 +272,10 @@ def main(argv=None):
         if len(args.known_lr)>0:
             print('Applying supplied lr:', args.known_lr[t])
             appr.lr = args.known_lr[t]
+            gen_params = gridsearch.gs_config.get_params('general')
+            for k, v in gen_params.items():
+                if not isinstance(v, list):
+                    setattr(appr, k, v)
 
         # Train
         appr.train(t, trn_loader[t], val_loader[t])

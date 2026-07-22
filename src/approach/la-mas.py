@@ -14,7 +14,7 @@ class Appr(Inc_Learning_Appr):
     def __init__(self, model, device, nepochs=100, lr=0.05, lr_min=1e-4, lr_factor=3, lr_patience=5, clipgrad=10000,
                  momentum=0, wd=0, multi_softmax=False, wu_nepochs=0, wu_lr_factor=1, fix_bn=False, eval_on_train=False,
                  logger=None, exemplars_dataset=None, lamb=[50], lamb_up_max =[1000.0], lamb_up_mult=[1.0], lamb_down=[1.0], tau_alpha=[0.8],
-                #  alpha=0.5, 
+                 alpha=0.5, 
                  fi_num_samples=-1):
         super(Appr, self).__init__(model, device, nepochs, lr, lr_min, lr_factor, lr_patience, clipgrad, momentum, wd,
                                    multi_softmax, wu_nepochs, wu_lr_factor, fix_bn, eval_on_train, logger,
@@ -24,7 +24,7 @@ class Appr(Inc_Learning_Appr):
         self.lamb_up_mult = lamb_up_mult
         self.lamb_down = lamb_down
         self.tau_alpha = tau_alpha
-        # self.alpha = alpha
+        self.alpha = alpha
         self.num_samples = fi_num_samples
         self.model_aux = None
         self.optimizer_expand = None
@@ -53,20 +53,20 @@ class Appr(Inc_Learning_Appr):
         # lambda is the regularizer trade-off -- In original code: MAS.ipynb block [4]: lambda set to 1
         parser.add_argument('--lamb', default=[50], type=list_of_floats, required=False,
                             help='Forgetting-intransigence trade-off  (default=%(default)s)')
-        parser.add_argument('--lamb-up-max', default=[1.0], type=list_of_floats, required=False,
+        parser.add_argument('--lamb_up_max', default=[1.0], type=list_of_floats, required=False,
                             help='Forgetting-intransigence trade-off (default=%(default)s)')
-        parser.add_argument('--lamb-up-mult', default=[1.0], type=list_of_floats, required=False,
+        parser.add_argument('--lamb_up_mult', default=[1.0], type=list_of_floats, required=False,
                             help='Forgetting-intransigence trade-off (default=%(default)s)')
-        parser.add_argument('--lamb-down', default=[1.0], type=list_of_floats, required=False,
+        parser.add_argument('--lamb_down', default=[1.0], type=list_of_floats, required=False,
                             help='Forgetting-intransigence trade-off (default=%(default)s)')
-        parser.add_argument('--tau-alpha', default=[0.8], type=list_of_floats, required=False,
+        parser.add_argument('--tau_alpha', default=[0.8], type=list_of_floats, required=False,
                             help='Forgetting-intransigence trade-off (default=%(default)s)')
         # lambda_e sets how important the new task is compared to the old one
         # parser.add_argument('--lamb-a', default=5, type=float, required=False,
         #                     help='Forgetting-intransigence trade-off (default=%(default)s)')
         # Define how old and new importance is fused, by default it is a 50-50 fusion
-        # parser.add_argument('--alpha', default=0.5, type=float, required=False,
-        #                     help='A-MAS alpha (default=%(default)s)')
+        parser.add_argument('--alpha', default=0.5, type=float, required=False,
+                            help='A-MAS alpha (default=%(default)s)')
         # Number of samples from train for estimating importance
         parser.add_argument('--fi-num-samples', default=-1, type=int, required=False,
                             help='Number of samples for MAS Importance (-1: all available) (default=%(default)s)')
@@ -107,11 +107,13 @@ class Appr(Inc_Learning_Appr):
         importance = {n: (p / n_samples) for n, p in importance.items()}
         return importance
     
-    def compute_la_importance(fisher_old,fisher,lamb,lamb_up_max,lamb_up_mult,lamb_down,tau_alpha):
+    def compute_la_importance(self,fisher_old,fisher,lamb,lamb_up_max,lamb_up_mult,lamb_down,tau_alpha):
         modified_fisher = {}
         for n in fisher.keys():
+            modified_fisher[n] = fisher_old[n]
             fisher_rel = fisher_old[n]/(fisher_old[n]+fisher[n]+0.0000000001) # Relative importance
-            frel_cut = torch.nan_to_num(torch.mean(fisher_rel.flatten())).item()
+            # frel_cut = torch.nan_to_num(torch.mean(fisher_rel.flatten())).item()
+            frel_cut = torch.mean(fisher_rel.flatten())
             frel_cut = tau_alpha*frel_cut
             lamb_up_min = torch.ceil(1/max(frel_cut,0.05))
             if lamb_up_max is not None:
@@ -134,8 +136,7 @@ class Appr(Inc_Learning_Appr):
                                                      shuffle=True,
                                                      num_workers=trn_loader.num_workers,
                                                      pin_memory=trn_loader.pin_memory)
-        print("lamb : ", self.lamb)
-        print("lamb_a : ", self.lamb_a)
+        print("lamb : ", self.lamb[t])
         if t > 0:
             print('=' * 108)
             print("Training of Auxiliary Network")
@@ -155,7 +156,7 @@ class Appr(Inc_Learning_Appr):
 
             # calculate importance of auxiliary model -> then compute la importance
             curr_importance = self.estimate_parameter_importance(self.model_aux, trn_loader)
-            la_importance = self.compute_la_importance(self.importance,curr_importance,self.lamb_up[t],self.lamb_up_max[t],self.lamb_up_mult[t],self.lamb_down[t],self.tau_alpha[t])
+            la_importance = self.compute_la_importance(self.importance,curr_importance,self.lamb[t],self.lamb_up_max[t],self.lamb_up_mult[t],self.lamb_down[t],self.tau_alpha[t])
             for n in self.importance_aux.keys():
                 # self.importance_aux[n] = curr_importance[n]
                 self.importance_aux[n] = la_importance[n]
@@ -195,13 +196,13 @@ class Appr(Inc_Learning_Appr):
             # for n, p in self.model.model.named_parameters():
             #     if n in self.importance.keys():
             #         loss_reg += torch.sum(self.importance[n] * (p - self.older_params[n]).pow(2)) / 2
-            # loss_reg_exp = 0
-            # auxiliary network memory aware synapses regularizer penalty
+            loss_reg_exp = 0
+            # la penalty
             for n, p in self.model.model.named_parameters():
                 if n in self.importance_aux.keys():
                     loss_reg_exp += torch.sum(self.importance_aux[n] * (p - self.auxiliary_params[n]).pow(2)) / 2            
             # loss += self.lamb * loss_reg + self.lamb_a * loss_reg_exp
-            loss += self.lamb * loss_reg_exp
+            loss += self.lamb[t] * loss_reg_exp
         # Current cross-entropy loss -- with exemplars use all heads
         if len(self.exemplars_dataset) > 0:
             return loss + torch.nn.functional.cross_entropy(torch.cat(outputs, dim=1), targets)
