@@ -168,16 +168,16 @@ def main(argv=None):
         appr_exemplars_dataset_args = argparse.Namespace()
 
     # Args -- GridSearch
-    if args.gridsearch_tasks > 0:
-        from gridsearch import GridSearch
-        gs_args, extra_args = GridSearch.extra_parser(extra_args)
-        Appr_finetuning = getattr(importlib.import_module(name='approach.finetuning'), 'Appr')
-        assert issubclass(Appr_finetuning, Inc_Learning_Appr)
-        GridSearch_ExemplarsDataset = Appr.exemplars_dataset_class()
-        print('GridSearch arguments =')
-        for arg in np.sort(list(vars(gs_args).keys())):
-            print('\t' + arg + ':', getattr(gs_args, arg))
-        print('=' * 108)
+    # if args.gridsearch_tasks > 0:
+    from gridsearch import GridSearch
+    gs_args, extra_args = GridSearch.extra_parser(extra_args)
+    Appr_finetuning = getattr(importlib.import_module(name='approach.finetuning'), 'Appr')
+    assert issubclass(Appr_finetuning, Inc_Learning_Appr)
+    GridSearch_ExemplarsDataset = Appr.exemplars_dataset_class()
+    # print('GridSearch arguments =')
+    # for arg in np.sort(list(vars(gs_args).keys())):
+    #     print('\t' + arg + ':', getattr(gs_args, arg))
+    # print('=' * 108)
 
     assert len(extra_args) == 0, "Unused args: {}".format(' '.join(extra_args))
     ####################################################################################################################
@@ -215,17 +215,12 @@ def main(argv=None):
     appr = Appr(net, device, **appr_kwargs)
 
     # GridSearch
-    if args.gridsearch_tasks > 0:
-        ft_kwargs = {**base_kwargs, **dict(logger=logger,
-                                            exemplars_dataset=GridSearch_ExemplarsDataset(transform, class_indices))}
-        appr_ft = Appr_finetuning(net, device, **ft_kwargs)
-        gridsearch = GridSearch(appr_ft, args.seed, gs_args.gridsearch_config, gs_args.gridsearch_acc_drop_thr,
-                                gs_args.gridsearch_hparam_decay, gs_args.gridsearch_max_num_searches)
-    else:
-        ft_kwargs = {**base_kwargs, **dict(logger=logger,
-                                            exemplars_dataset=GridSearch_ExemplarsDataset(transform, class_indices))}
-        appr_ft = Appr_finetuning(net, device, **ft_kwargs)
-        gridsearch = GridSearch(appr_ft, args.seed)
+    # if args.gridsearch_tasks > 0:
+    ft_kwargs = {**base_kwargs, **dict(logger=logger,
+                                        exemplars_dataset=GridSearch_ExemplarsDataset(transform, class_indices))}
+    appr_ft = Appr_finetuning(net, device, **ft_kwargs)
+    gridsearch = GridSearch(appr_ft, args.seed, gs_args.gridsearch_config, gs_args.gridsearch_acc_drop_thr,
+                            gs_args.gridsearch_hparam_decay, gs_args.gridsearch_max_num_searches)
 
     # Loop tasks
     print(taskcla)
