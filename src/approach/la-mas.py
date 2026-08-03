@@ -117,11 +117,11 @@ class Appr(Inc_Learning_Appr):
     
     def compute_la_importance(self,t,fisher_old,fisher,lamb,lamb_up_max,lamb_up_mult,lamb_down,tau_alpha):
         modified_fisher = {}
-        fisher_rel = {}
+        fisher_rel_dict = {}
         for n in fisher.keys():
             modified_fisher[n] = fisher_old[n]
             fisher_rel = fisher_old[n]/(fisher_old[n]+fisher[n]+0.0000000001) # Relative importance
-            fisher_rel[n] = fisher_rel
+            fisher_rel_dict[n] = fisher_rel
             # frel_cut = torch.nan_to_num(torch.mean(fisher_rel.flatten())).item()
             frel_cut = torch.mean(fisher_rel.flatten())
             frel_cut = tau_alpha*frel_cut
@@ -135,9 +135,9 @@ class Appr(Inc_Learning_Appr):
             modified_fisher[n][fisher_rel>frel_cut] = lamb_up*fisher_rel[fisher_rel>frel_cut]*fisher_old[n][fisher_rel>frel_cut]
             # [2] Other situations: Important for both or for only new task or neither -> make it more elastic (i.e. decrease fisher scaling)
             modified_fisher[n][fisher_rel<=frel_cut] = lamb_down*fisher_rel[fisher_rel<=frel_cut]*fisher_old[n][fisher_rel<=frel_cut]
-            if self.save_alphas:
-                with open(self.alpha_rel_save_path+'/t'+str(t)+'_fisher_rel.pkl', 'wb') as fp:
-                    pickle.dump(fisher_rel, fp)
+        if self.save_alphas:
+            with open(self.alpha_rel_save_path+'/t'+str(t)+'_fisher_rel.pkl', 'wb') as fp:
+                pickle.dump(fisher_rel_dict, fp)
         return modified_fisher
 
     def train_loop(self, t, trn_loader, val_loader):
