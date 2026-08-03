@@ -2,6 +2,7 @@ import torch
 import itertools
 from argparse import ArgumentParser
 from copy import deepcopy
+import pickle
 
 from .incremental_learning import Inc_Learning_Appr
 from datasets.exemplars_dataset import ExemplarsDataset
@@ -14,6 +15,7 @@ class Appr(Inc_Learning_Appr):
     def __init__(self, model, device, nepochs=100, lr=0.05, lr_min=1e-4, lr_factor=3, lr_patience=5, clipgrad=10000,
                  momentum=0, wd=0, multi_softmax=False, wu_nepochs=0, wu_lr_factor=1, fix_bn=False, eval_on_train=False,
                  logger=None, exemplars_dataset=None, lamb=[50], lamb_up_max =[1000.0], lamb_up_mult=[1.0], lamb_down=[1.0], tau_alpha=[0.8],
+                 alpha_rel_save_path='',
                  alpha=0.5, 
                  fi_num_samples=-1):
         super(Appr, self).__init__(model, device, nepochs, lr, lr_min, lr_factor, lr_patience, clipgrad, momentum, wd,
@@ -24,6 +26,7 @@ class Appr(Inc_Learning_Appr):
         self.lamb_up_mult = lamb_up_mult
         self.lamb_down = lamb_down
         self.tau_alpha = tau_alpha
+        self.alpha_rel_save_path = alpha_rel_save_path
         self.alpha = alpha
         self.num_samples = fi_num_samples
         self.model_aux = None
@@ -61,6 +64,8 @@ class Appr(Inc_Learning_Appr):
                             help='Forgetting-intransigence trade-off (default=%(default)s)')
         parser.add_argument('--tau_alpha', default=[0.8], type=list_of_floats, required=False,
                             help='Forgetting-intransigence trade-off (default=%(default)s)')
+        parser.add_argument('--alpha_rel_save_path', default='', type=str, required=False,
+                                    help='Path to save computed alphas (default=%(default)s)')
         # lambda_e sets how important the new task is compared to the old one
         # parser.add_argument('--lamb-a', default=5, type=float, required=False,
         #                     help='Forgetting-intransigence trade-off (default=%(default)s)')
@@ -107,11 +112,13 @@ class Appr(Inc_Learning_Appr):
         importance = {n: (p / n_samples) for n, p in importance.items()}
         return importance
     
-    def compute_la_importance(self,fisher_old,fisher,lamb,lamb_up_max,lamb_up_mult,lamb_down,tau_alpha):
+    def compute_la_importance(self,t,fisher_old,fisher,lamb,lamb_up_max,lamb_up_mult,lamb_down,tau_alpha):
         modified_fisher = {}
+        fisher_rel = {}
         for n in fisher.keys():
             modified_fisher[n] = fisher_old[n]
             fisher_rel = fisher_old[n]/(fisher_old[n]+fisher[n]+0.0000000001) # Relative importance
+            fisher_rel[n] = fisher_rel
             # frel_cut = torch.nan_to_num(torch.mean(fisher_rel.flatten())).item()
             frel_cut = torch.mean(fisher_rel.flatten())
             frel_cut = tau_alpha*frel_cut
@@ -125,6 +132,8 @@ class Appr(Inc_Learning_Appr):
             modified_fisher[n][fisher_rel>frel_cut] = lamb_up*fisher_rel[fisher_rel>frel_cut]*fisher_old[n][fisher_rel>frel_cut]
             # [2] Other situations: Important for both or for only new task or neither -> make it more elastic (i.e. decrease fisher scaling)
             modified_fisher[n][fisher_rel<=frel_cut] = lamb_down*fisher_rel[fisher_rel<=frel_cut]*fisher_old[n][fisher_rel<=frel_cut]
+            with open(self.alpha_rel_save_path+'/t'+str(t)+'_fisher_rel.pkl', 'wb') as fp:
+                pickle.dump(fisher_rel, fp)
         return modified_fisher
 
     def train_loop(self, t, trn_loader, val_loader):
@@ -156,7 +165,8 @@ class Appr(Inc_Learning_Appr):
 
             # calculate importance of auxiliary model -> then compute la importance
             curr_importance = self.estimate_parameter_importance(self.model_aux, trn_loader)
-            la_importance = self.compute_la_importance(self.importance,curr_importance,self.lamb[t],self.lamb_up_max[t],self.lamb_up_mult[t],self.lamb_down[t],self.tau_alpha[t])
+            la_importance = self.compute_la_importance(t,self.importance,curr_importance,self.lamb[t],self.lamb_up_max[t],self.lamb_up_mult[t],self.lamb_down[t],self.tau_alpha[t])
+            
             for n in self.importance_aux.keys():
                 # self.importance_aux[n] = curr_importance[n]
                 self.importance_aux[n] = la_importance[n]

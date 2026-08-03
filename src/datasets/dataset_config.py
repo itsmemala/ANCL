@@ -1,6 +1,6 @@
 from os.path import join
 
-_BASE_DATA_PATH = "../data"
+_BASE_DATA_PATH = "/content/gdrive/MyDrive/fabr_data/SCL/data"
 
 dataset_config = {
     'mnist': {
