@@ -15,7 +15,7 @@ class Appr(Inc_Learning_Appr):
     def __init__(self, model, device, nepochs=100, lr=0.05, lr_min=1e-4, lr_factor=3, lr_patience=5, clipgrad=10000,
                  momentum=0, wd=0, multi_softmax=False, wu_nepochs=0, wu_lr_factor=1, fix_bn=False, eval_on_train=False,
                  logger=None, exemplars_dataset=None, lamb=[50], lamb_up_max =[1000.0], lamb_up_mult=[1.0], lamb_down=[1.0], tau_alpha=[0.8],
-                 alpha_rel_save_path='',
+                 save_alphas=False, alpha_rel_save_path='',
                  alpha=0.5, 
                  fi_num_samples=-1):
         super(Appr, self).__init__(model, device, nepochs, lr, lr_min, lr_factor, lr_patience, clipgrad, momentum, wd,
@@ -26,6 +26,7 @@ class Appr(Inc_Learning_Appr):
         self.lamb_up_mult = lamb_up_mult
         self.lamb_down = lamb_down
         self.tau_alpha = tau_alpha
+        self.save_alphas = save_alphas
         self.alpha_rel_save_path = alpha_rel_save_path
         self.alpha = alpha
         self.num_samples = fi_num_samples
@@ -64,6 +65,8 @@ class Appr(Inc_Learning_Appr):
                             help='Forgetting-intransigence trade-off (default=%(default)s)')
         parser.add_argument('--tau_alpha', default=[0.8], type=list_of_floats, required=False,
                             help='Forgetting-intransigence trade-off (default=%(default)s)')
+        parser.add_argument('--save_alphas', default=False, type=bool, required=False,
+                            help='Whether to save computed alphas (default=%(default)s)')
         parser.add_argument('--alpha_rel_save_path', default='', type=str, required=False,
                                     help='Path to save computed alphas (default=%(default)s)')
         # lambda_e sets how important the new task is compared to the old one
@@ -132,8 +135,9 @@ class Appr(Inc_Learning_Appr):
             modified_fisher[n][fisher_rel>frel_cut] = lamb_up*fisher_rel[fisher_rel>frel_cut]*fisher_old[n][fisher_rel>frel_cut]
             # [2] Other situations: Important for both or for only new task or neither -> make it more elastic (i.e. decrease fisher scaling)
             modified_fisher[n][fisher_rel<=frel_cut] = lamb_down*fisher_rel[fisher_rel<=frel_cut]*fisher_old[n][fisher_rel<=frel_cut]
-            with open(self.alpha_rel_save_path+'/t'+str(t)+'_fisher_rel.pkl', 'wb') as fp:
-                pickle.dump(fisher_rel, fp)
+            if self.save_alphas:
+                with open(self.alpha_rel_save_path+'/t'+str(t)+'_fisher_rel.pkl', 'wb') as fp:
+                    pickle.dump(fisher_rel, fp)
         return modified_fisher
 
     def train_loop(self, t, trn_loader, val_loader):
