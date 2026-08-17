@@ -14,7 +14,7 @@ class Appr(Inc_Learning_Appr):
     """Class implementing LA-MAS approach"""
     def __init__(self, model, device, nepochs=100, lr=0.05, lr_min=1e-4, lr_factor=3, lr_patience=5, clipgrad=10000,
                  momentum=0, wd=0, multi_softmax=False, wu_nepochs=0, wu_lr_factor=1, fix_bn=False, eval_on_train=False,
-                 logger=None, exemplars_dataset=None, lamb=[50], lamb_up_max =[1000.0], lamb_up_mult=[1.0], lamb_down=[1.0], tau_alpha=[0.8],
+                 logger=None, exemplars_dataset=None, lamb=[50], lamb_up_max =[1000.0], lamb_up_mult=[1.0], lamb_down=[1.0], tau_alpha1=[0.8], tau_alpha2=[0.0],
                  save_alphas=False, alpha_rel_save_path='',
                  alpha=0.5, 
                  fi_num_samples=-1):
@@ -25,7 +25,8 @@ class Appr(Inc_Learning_Appr):
         self.lamb_up_max = lamb_up_max
         self.lamb_up_mult = lamb_up_mult
         self.lamb_down = lamb_down
-        self.tau_alpha = tau_alpha
+        self.tau_alpha1 = tau_alpha1
+        self.tau_alpha2 = tau_alpha2
         self.save_alphas = save_alphas
         self.alpha_rel_save_path = alpha_rel_save_path
         self.alpha = alpha
@@ -63,8 +64,10 @@ class Appr(Inc_Learning_Appr):
                             help='Forgetting-intransigence trade-off (default=%(default)s)')
         parser.add_argument('--lamb_down', default=[1.0], type=list_of_floats, required=False,
                             help='Forgetting-intransigence trade-off (default=%(default)s)')
-        parser.add_argument('--tau_alpha', default=[0.8], type=list_of_floats, required=False,
+        parser.add_argument('--tau_alpha1', default=[0.8], type=list_of_floats, required=False,
                             help='Forgetting-intransigence trade-off (default=%(default)s)')
+        parser.add_argument('--tau_alpha2', default=[0.0], type=list_of_floats, required=False,
+                                    help='Forgetting-intransigence trade-off (default=%(default)s)')
         parser.add_argument('--save_alphas', default=False, type=bool, required=False,
                             help='Whether to save computed alphas (default=%(default)s)')
         parser.add_argument('--alpha_rel_save_path', default='', type=str, required=False,
@@ -115,7 +118,7 @@ class Appr(Inc_Learning_Appr):
         importance = {n: (p / n_samples) for n, p in importance.items()}
         return importance
     
-    def compute_la_importance(self,t,fisher_old,fisher,lamb,lamb_up_max,lamb_up_mult,lamb_down,tau_alpha):
+    def compute_la_importance(self,t,fisher_old,fisher,lamb,lamb_up_max,lamb_up_mult,lamb_down,tau_alpha1,tau_alpha2):
         modified_fisher = {}
         fisher_rel_dict = {}
         for n in fisher.keys():
@@ -123,8 +126,9 @@ class Appr(Inc_Learning_Appr):
             fisher_rel = fisher_old[n]/(fisher_old[n]+fisher[n]+0.0000000001) # Relative importance
             fisher_rel_dict[n] = fisher_rel
             # frel_cut = torch.nan_to_num(torch.mean(fisher_rel.flatten())).item()
-            frel_cut = torch.mean(fisher_rel.flatten())
-            frel_cut = tau_alpha*frel_cut
+            frel_mn = torch.mean(fisher_rel.flatten())
+            frel_std = torch.std(fisher_rel.flatten())
+            frel_cut = tau_alpha1*frel_mn + (tau_alpha2*frel_std)
             lamb_up_min = torch.ceil(1/max(frel_cut,0.05))
             if lamb_up_max is not None:
                 lamb_up_max = max(lamb_up_max/lamb,lamb_up_min)
@@ -169,7 +173,7 @@ class Appr(Inc_Learning_Appr):
 
             # calculate importance of auxiliary model -> then compute la importance
             curr_importance = self.estimate_parameter_importance(self.model_aux, trn_loader)
-            la_importance = self.compute_la_importance(t,self.importance,curr_importance,self.lamb[t],self.lamb_up_max[t],self.lamb_up_mult[t],self.lamb_down[t],self.tau_alpha[t])
+            la_importance = self.compute_la_importance(t,self.importance,curr_importance,self.lamb[t],self.lamb_up_max[t],self.lamb_up_mult[t],self.lamb_down[t],self.tau_alpha1[t],self.tau_alpha2[t])
             
             for n in self.importance_aux.keys():
                 # self.importance_aux[n] = curr_importance[n]
