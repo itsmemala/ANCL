@@ -3,6 +3,8 @@ import itertools
 from argparse import ArgumentParser
 from copy import deepcopy
 import pickle
+import os
+import io
 
 from .incremental_learning import Inc_Learning_Appr
 from datasets.exemplars_dataset import ExemplarsDataset
@@ -10,12 +12,20 @@ from datasets.exemplars_dataset import ExemplarsDataset
 def list_of_floats(arg):
     return list(map(float, arg.split(',')))
 
+class CPU_Unpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        if module == 'torch.storage' and name == '_load_from_bytes':
+            return lambda b: torch.load(io.BytesIO(b), map_location='cpu')
+        else:
+            return super().find_class(module, name)
+
 class Appr(Inc_Learning_Appr):
     """Class implementing LA-MAS approach"""
     def __init__(self, model, device, nepochs=100, lr=0.05, lr_min=1e-4, lr_factor=3, lr_patience=5, clipgrad=10000,
                  momentum=0, wd=0, multi_softmax=False, wu_nepochs=0, wu_lr_factor=1, fix_bn=False, eval_on_train=False,
                  logger=None, exemplars_dataset=None, lamb=[50], lamb_up_max =[1000.0], lamb_up_mult=[1.0], lamb_down=[1.0], tau_alpha1=[0.8], tau_alpha2=[0.0],
                  save_alphas=False, alpha_rel_save_path='',
+                 save_models_imps_path=None, retrain_main_task_model=None,
                  alpha=0.5, 
                  fi_num_samples=-1):
         super(Appr, self).__init__(model, device, nepochs, lr, lr_min, lr_factor, lr_patience, clipgrad, momentum, wd,
@@ -29,6 +39,8 @@ class Appr(Inc_Learning_Appr):
         self.tau_alpha2 = tau_alpha2
         self.save_alphas = save_alphas
         self.alpha_rel_save_path = alpha_rel_save_path
+        self.save_models_imps_path = save_models_imps_path
+        self.retrain_main_task_model = retrain_main_task_model
         self.alpha = alpha
         self.num_samples = fi_num_samples
         self.model_aux = None
@@ -72,6 +84,10 @@ class Appr(Inc_Learning_Appr):
                             help='Whether to save computed alphas (default=%(default)s)')
         parser.add_argument('--alpha_rel_save_path', default='', type=str, required=False,
                                     help='Path to save computed alphas (default=%(default)s)')
+        parser.add_argument('--save_models_imps_path', default=None, type=str, required=False,
+                                    help='Path to save models and importances for training from middle (default=%(default)s)')
+        parser.add_argument('--retrain_main_task_model', default=None, type=int, required=False,
+                                    help='Which task to re-train main network (for hyp search) (default=%(default)s)')
         # lambda_e sets how important the new task is compared to the old one
         # parser.add_argument('--lamb-a', default=5, type=float, required=False,
         #                     help='Forgetting-intransigence trade-off (default=%(default)s)')
@@ -146,47 +162,75 @@ class Appr(Inc_Learning_Appr):
 
     def train_loop(self, t, trn_loader, val_loader):
         """Contains the epochs loop"""
-        # add exemplars to train_loader
-        if len(self.exemplars_dataset) > 0 and t > 0:
-            trn_loader = torch.utils.data.DataLoader(trn_loader.dataset + self.exemplars_dataset,
-                                                     batch_size=trn_loader.batch_size,
-                                                     shuffle=True,
-                                                     num_workers=trn_loader.num_workers,
-                                                     pin_memory=trn_loader.pin_memory)
-        print("lamb : ", self.lamb[t])
-        if t > 0:
+        # Load model if already trained (except when doing hyp-param search):
+        main_model_path = self.save_models_imps_path+"_t"+str(t)+"_model_state_dict"
+        if t<self.retrain_main_task_model and os.path.exists(main_model_path):
+            self.model.load_state_dict(torch.load(main_model_path, weights_only=True))
             print('=' * 108)
-            print("Training of Auxiliary Network")
+            print("Loaded Main Network. No Training.")
             print('=' * 108)
-            # Args for the new trainer
-            new_trainer_args = dict(nepochs=self.nepochs, lr=self.lr, lr_min=self.lr_min, lr_factor=self.lr_factor,
-                            lr_patience=self.lr_patience, clipgrad=self.clipgrad, momentum=0.9,
-                            wd=5e-4, multi_softmax=self.multi_softmax, wu_nepochs=self.warmup_epochs,
-                            wu_lr_factor=self.warmup_lr, fix_bn=self.fix_bn, logger=self.logger)
-            self.model_aux = deepcopy(self.model)
-            # Train auxiliary model on current dataset
-            new_trainer = NewTaskTrainer(self.model_aux, self.device, **new_trainer_args)
-            new_trainer.train_loop(t, trn_loader, val_loader)
+        else:
+            # add exemplars to train_loader
+            if len(self.exemplars_dataset) > 0 and t > 0:
+                trn_loader = torch.utils.data.DataLoader(trn_loader.dataset + self.exemplars_dataset,
+                                                        batch_size=trn_loader.batch_size,
+                                                        shuffle=True,
+                                                        num_workers=trn_loader.num_workers,
+                                                        pin_memory=trn_loader.pin_memory)
+            print("lamb : ", self.lamb[t])
+            if t > 0:
+                # Load model if already trained (except when doing hyp-param search):
+                aux_model_path = self.save_models_imps_path+"_t"+str(t)+"_aux_model_state_dict"
+                la_imp_path = self.save_models_imps_path+"_t"+str(t)+"_la_imp.pkl"
+                if os.path.exists(aux_model_path):
+                    self.model_aux = deepcopy(self.model)
+                    self.model_aux.load_state_dict(torch.load(aux_model_path, weights_only=True))
+                    with open(la_imp_path, 'rb') as handle:
+                        self.importance_aux = CPU_Unpickler(handle).load()
+                    print('=' * 108)
+                    print("Loaded Aux Network and LA imp. No Training.")
+                    print('=' * 108)
+                else:
+                    print('=' * 108)
+                    print("Training of Auxiliary Network")
+                    print('=' * 108)
+                    # Args for the new trainer
+                    new_trainer_args = dict(nepochs=self.nepochs, lr=self.lr, lr_min=self.lr_min, lr_factor=self.lr_factor,
+                                    lr_patience=self.lr_patience, clipgrad=self.clipgrad, momentum=0.9,
+                                    wd=5e-4, multi_softmax=self.multi_softmax, wu_nepochs=self.warmup_epochs,
+                                    wu_lr_factor=self.warmup_lr, fix_bn=self.fix_bn, logger=self.logger)
+                    self.model_aux = deepcopy(self.model)
+                    # Train auxiliary model on current dataset
+                    new_trainer = NewTaskTrainer(self.model_aux, self.device, **new_trainer_args)
+                    new_trainer.train_loop(t, trn_loader, val_loader)
 
-            # Store parameter of auxiliary model to compute regularizer later
-            self.auxiliary_params = {n: p.clone().detach() for n, p in self.model_aux.model.named_parameters() if p.requires_grad}
+                    # Store parameter of auxiliary model to compute regularizer later
+                    self.auxiliary_params = {n: p.clone().detach() for n, p in self.model_aux.model.named_parameters() if p.requires_grad}
 
-            # calculate importance of auxiliary model -> then compute la importance
-            curr_importance = self.estimate_parameter_importance(self.model_aux, trn_loader)
-            la_importance = self.compute_la_importance(t,self.importance,curr_importance,self.lamb[t],self.lamb_up_max[t],self.lamb_up_mult[t],self.lamb_down[t],self.tau_alpha1[t],self.tau_alpha2[t])
-            
-            for n in self.importance_aux.keys():
-                # self.importance_aux[n] = curr_importance[n]
-                self.importance_aux[n] = la_importance[n]
+                    # calculate importance of auxiliary model -> then compute la importance
+                    curr_importance = self.estimate_parameter_importance(self.model_aux, trn_loader)
+                    la_importance = self.compute_la_importance(t,self.importance,curr_importance,self.lamb[t],self.lamb_up_max[t],self.lamb_up_mult[t],self.lamb_down[t],self.tau_alpha1[t],self.tau_alpha2[t])
+                    
+                    for n in self.importance_aux.keys():
+                        # self.importance_aux[n] = curr_importance[n]
+                        self.importance_aux[n] = la_importance[n]
 
-        print('=' * 108)
-        print("Training of Main Network")
-        print('=' * 108)
-        # FINETUNING TRAINING -- contains the epochs loop
-        super().train_loop(t, trn_loader, val_loader)
+                    # save aux network and la imp to re-use and avoid training each time during hyp-param search
+                    torch.save(self.model_aux.state_dict(), aux_model_path)
+                    with open(la_imp_path, 'wb') as fp:
+                        pickle.dump(la_importance, fp)
 
-        # EXEMPLAR MANAGEMENT -- select training subset
-        self.exemplars_dataset.collect_exemplars(self.model, trn_loader, val_loader.dataset.transform)
+            print('=' * 108)
+            print("Training of Main Network")
+            print('=' * 108)
+            # FINETUNING TRAINING -- contains the epochs loop
+            super().train_loop(t, trn_loader, val_loader)
+
+            # EXEMPLAR MANAGEMENT -- select training subset
+            self.exemplars_dataset.collect_exemplars(self.model, trn_loader, val_loader.dataset.transform)
+
+            # Save model to re-use and avoid training each time during hyp-param search
+            torch.save(self.model.state_dict(), main_model_path)
 
     def post_train_process(self, t, trn_loader):
         """Runs after training all the epochs of the task (after the train session)"""
