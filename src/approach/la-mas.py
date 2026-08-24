@@ -191,10 +191,8 @@ class Appr(Inc_Learning_Appr):
                 if os.path.exists(aux_model_path):
                     self.model_aux = deepcopy(self.model)
                     self.model_aux.load_state_dict(torch.load(aux_model_path))
-                    with open(la_imp_path, 'rb') as handle:
-                        self.importance_aux = CUDA_Unpickler(handle).load()
                     print('=' * 108)
-                    print("Loaded Aux Network and LA imp. No Training.")
+                    print("Loaded Aux Network. No Training.")
                     print('=' * 108)
                 else:
                     print('=' * 108)
@@ -213,18 +211,16 @@ class Appr(Inc_Learning_Appr):
                     # Store parameter of auxiliary model to compute regularizer later
                     self.auxiliary_params = {n: p.clone().detach() for n, p in self.model_aux.model.named_parameters() if p.requires_grad}
 
-                    # calculate importance of auxiliary model -> then compute la importance
-                    curr_importance = self.estimate_parameter_importance(self.model_aux, trn_loader)
-                    la_importance = self.compute_la_importance(t,self.importance,curr_importance,self.lamb[t],self.lamb_up_max[t],self.lamb_up_mult[t],self.lamb_down[t],self.tau_alpha1[t],self.tau_alpha2[t])
-                    
-                    for n in self.importance_aux.keys():
-                        # self.importance_aux[n] = curr_importance[n]
-                        self.importance_aux[n] = la_importance[n]
-
-                    # save aux network and la imp to re-use and avoid training each time during hyp-param search
+                    # save aux network to re-use and avoid training each time during hyp-param search
                     torch.save(self.model_aux.state_dict(), aux_model_path)
-                    with open(la_imp_path, 'wb') as fp:
-                        pickle.dump(la_importance, fp)
+
+                # calculate importance of auxiliary model -> then compute la importance
+                curr_importance = self.estimate_parameter_importance(self.model_aux, trn_loader)
+                la_importance = self.compute_la_importance(t,self.importance,curr_importance,self.lamb[t],self.lamb_up_max[t],self.lamb_up_mult[t],self.lamb_down[t],self.tau_alpha1[t],self.tau_alpha2[t])
+                
+                for n in self.importance_aux.keys():
+                    # self.importance_aux[n] = curr_importance[n]
+                    self.importance_aux[n] = la_importance[n]
 
             print('=' * 108)
             print("Training of Main Network")
