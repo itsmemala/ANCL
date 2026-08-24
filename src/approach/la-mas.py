@@ -187,7 +187,6 @@ class Appr(Inc_Learning_Appr):
             if t > 0:
                 # Load model if already trained (except when doing hyp-param search):
                 aux_model_path = self.save_models_imps_path+"_t"+str(t)+"_aux_model_state_dict"
-                la_imp_path = self.save_models_imps_path+"_t"+str(t)+"_la_imp.pkl"
                 if os.path.exists(aux_model_path):
                     self.model_aux = deepcopy(self.model)
                     self.model_aux.load_state_dict(torch.load(aux_model_path))
