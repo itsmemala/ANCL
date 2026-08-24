@@ -18,6 +18,12 @@ class CPU_Unpickler(pickle.Unpickler):
             return lambda b: torch.load(io.BytesIO(b), map_location='cpu')
         else:
             return super().find_class(module, name)
+class CUDA_Unpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        if module == 'torch.storage' and name == '_load_from_bytes':
+            return lambda b: torch.load(io.BytesIO(b), map_location='cuda')
+        else:
+            return super().find_class(module, name)
 
 class Appr(Inc_Learning_Appr):
     """Class implementing LA-MAS approach"""
@@ -186,7 +192,7 @@ class Appr(Inc_Learning_Appr):
                     self.model_aux = deepcopy(self.model)
                     self.model_aux.load_state_dict(torch.load(aux_model_path))
                     with open(la_imp_path, 'rb') as handle:
-                        self.importance_aux = CPU_Unpickler(handle).load()
+                        self.importance_aux = CUDA_Unpickler(handle).load()
                     print('=' * 108)
                     print("Loaded Aux Network and LA imp. No Training.")
                     print('=' * 108)
