@@ -165,7 +165,7 @@ class Appr(Inc_Learning_Appr):
         # Load model if already trained (except when doing hyp-param search):
         main_model_path = self.save_models_imps_path+"_t"+str(t)+"_model_state_dict"
         if t<self.retrain_main_task_model and os.path.exists(main_model_path):
-            self.model.load_state_dict(torch.load(main_model_path, weights_only=True))
+            self.model.load_state_dict(torch.load(main_model_path))
             print('=' * 108)
             print("Loaded Main Network. No Training.")
             print('=' * 108)
@@ -184,7 +184,7 @@ class Appr(Inc_Learning_Appr):
                 la_imp_path = self.save_models_imps_path+"_t"+str(t)+"_la_imp.pkl"
                 if os.path.exists(aux_model_path):
                     self.model_aux = deepcopy(self.model)
-                    self.model_aux.load_state_dict(torch.load(aux_model_path, weights_only=True))
+                    self.model_aux.load_state_dict(torch.load(aux_model_path))
                     with open(la_imp_path, 'rb') as handle:
                         self.importance_aux = CPU_Unpickler(handle).load()
                     print('=' * 108)
