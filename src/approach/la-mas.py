@@ -262,7 +262,7 @@ class Appr(Inc_Learning_Appr):
             # la penalty
             for n, p in self.model.model.named_parameters():
                 if n in self.importance_aux.keys():
-                    loss_reg_exp += torch.sum(self.importance_aux[n] * (p - self.auxiliary_params[n]).pow(2)) / 2            
+                    loss_reg_exp += torch.sum(self.importance_aux[n] * (p - self.older_params[n]).pow(2)) / 2            
             # loss += self.lamb * loss_reg + self.lamb_a * loss_reg_exp
             loss += self.lamb[t] * loss_reg_exp
         # Current cross-entropy loss -- with exemplars use all heads
