@@ -2,6 +2,7 @@ import torch
 import itertools
 from argparse import ArgumentParser
 from copy import deepcopy
+import os
 
 from .incremental_learning import Inc_Learning_Appr
 from datasets.exemplars_dataset import ExemplarsDataset
@@ -11,7 +12,8 @@ class Appr(Inc_Learning_Appr):
     """Class implementing A-MAS approach in our paper"""
     def __init__(self, model, device, nepochs=100, lr=0.05, lr_min=1e-4, lr_factor=3, lr_patience=5, clipgrad=10000,
                  momentum=0, wd=0, multi_softmax=False, wu_nepochs=0, wu_lr_factor=1, fix_bn=False, eval_on_train=False,
-                 logger=None, exemplars_dataset=None, lamb=50, lamb_a =5, alpha=0.5, fi_num_samples=-1):
+                 logger=None, exemplars_dataset=None, lamb=50, lamb_a =5, alpha=0.5, fi_num_samples=-1,
+                 save_models_imps_path=None, retrain_main_task_model=None):
         super(Appr, self).__init__(model, device, nepochs, lr, lr_min, lr_factor, lr_patience, clipgrad, momentum, wd,
                                    multi_softmax, wu_nepochs, wu_lr_factor, fix_bn, eval_on_train, logger,
                                    exemplars_dataset)
@@ -21,6 +23,9 @@ class Appr(Inc_Learning_Appr):
         self.num_samples = fi_num_samples
         self.model_aux = None
         self.optimizer_expand = None
+
+        self.save_models_imps_path = save_models_imps_path
+        self.retrain_main_task_model = retrain_main_task_model
 
         # In all cases, we only keep importance weights for the model, but not for the heads.
         feat_ext = self.model.model
@@ -55,6 +60,10 @@ class Appr(Inc_Learning_Appr):
         # Number of samples from train for estimating importance
         parser.add_argument('--fi-num-samples', default=-1, type=int, required=False,
                             help='Number of samples for MAS Importance (-1: all available) (default=%(default)s)')
+        parser.add_argument('--save_models_imps_path', default=None, type=str, required=False,
+                            help='Path to save models and importances for training from middle (default=%(default)s)')
+        parser.add_argument('--retrain_main_task_model', default=None, type=int, required=False,
+                            help='Which task to re-train main network (for hyp search) (default=%(default)s)')
         return parser.parse_known_args(args)
 
     def _get_optimizer(self):
@@ -94,45 +103,68 @@ class Appr(Inc_Learning_Appr):
 
     def train_loop(self, t, trn_loader, val_loader):
         """Contains the epochs loop"""
-        # add exemplars to train_loader
-        if len(self.exemplars_dataset) > 0 and t > 0:
-            trn_loader = torch.utils.data.DataLoader(trn_loader.dataset + self.exemplars_dataset,
-                                                     batch_size=trn_loader.batch_size,
-                                                     shuffle=True,
-                                                     num_workers=trn_loader.num_workers,
-                                                     pin_memory=trn_loader.pin_memory)
-        print("lamb : ", self.lamb)
-        print("lamb_a : ", self.lamb_a)
-        if t > 0:
+        # Load model if already trained (except when doing hyp-param search):
+        main_model_path = self.save_models_imps_path+"_t"+str(t)+"_model_state_dict"
+        if t<self.retrain_main_task_model and os.path.exists(main_model_path):
+            self.model.load_state_dict(torch.load(main_model_path))
             print('=' * 108)
-            print("Training of Auxiliary Network")
+            print("Loaded Main Network. No Training.")
             print('=' * 108)
-            # Args for the new trainer
-            new_trainer_args = dict(nepochs=self.nepochs, lr=self.lr, lr_min=self.lr_min, lr_factor=self.lr_factor,
-                            lr_patience=self.lr_patience, clipgrad=self.clipgrad, momentum=0.9,
-                            wd=5e-4, multi_softmax=self.multi_softmax, wu_nepochs=self.warmup_epochs,
-                            wu_lr_factor=self.warmup_lr, fix_bn=self.fix_bn, logger=self.logger)
-            self.model_aux = deepcopy(self.model)
-            # Train auxiliary model on current dataset
-            new_trainer = NewTaskTrainer(self.model_aux, self.device, **new_trainer_args)
-            new_trainer.train_loop(t, trn_loader, val_loader)
+        else:
+            # add exemplars to train_loader
+            if len(self.exemplars_dataset) > 0 and t > 0:
+                trn_loader = torch.utils.data.DataLoader(trn_loader.dataset + self.exemplars_dataset,
+                                                        batch_size=trn_loader.batch_size,
+                                                        shuffle=True,
+                                                        num_workers=trn_loader.num_workers,
+                                                        pin_memory=trn_loader.pin_memory)
+            print("lamb : ", self.lamb)
+            print("lamb_a : ", self.lamb_a)
+            if t > 0:
+                # Load model if already trained:
+                aux_model_path = self.save_models_imps_path+"_t"+str(t)+"_aux_model_state_dict"
+                if os.path.exists(aux_model_path):
+                    self.model_aux = deepcopy(self.model)
+                    self.model_aux.load_state_dict(torch.load(aux_model_path))
+                    print('=' * 108)
+                    print("Loaded Aux Network. No Training.")
+                    print('=' * 108)
+                else:
+                    print('=' * 108)
+                    print("Training of Auxiliary Network")
+                    print('=' * 108)
+                    # Args for the new trainer
+                    new_trainer_args = dict(nepochs=self.nepochs, lr=self.lr, lr_min=self.lr_min, lr_factor=self.lr_factor,
+                                    lr_patience=self.lr_patience, clipgrad=self.clipgrad, momentum=0.9,
+                                    wd=5e-4, multi_softmax=self.multi_softmax, wu_nepochs=self.warmup_epochs,
+                                    wu_lr_factor=self.warmup_lr, fix_bn=self.fix_bn, logger=self.logger)
+                    self.model_aux = deepcopy(self.model)
+                    # Train auxiliary model on current dataset
+                    new_trainer = NewTaskTrainer(self.model_aux, self.device, **new_trainer_args)
+                    new_trainer.train_loop(t, trn_loader, val_loader)
 
-            # Store parameter of auxiliary model to compute regularizer later
-            self.auxiliary_params = {n: p.clone().detach() for n, p in self.model_aux.model.named_parameters() if p.requires_grad}
+                    # Store parameter of auxiliary model to compute regularizer later
+                    self.auxiliary_params = {n: p.clone().detach() for n, p in self.model_aux.model.named_parameters() if p.requires_grad}
 
-            # calculate importance of auxiliary model
-            curr_importance = self.estimate_parameter_importance(self.model_aux, trn_loader)
-            for n in self.importance_aux.keys():
-                self.importance_aux[n] = curr_importance[n]
+                    # save aux network to re-use and avoid training each time during hyp-param search
+                    torch.save(self.model_aux.state_dict(), aux_model_path)
 
-        print('=' * 108)
-        print("Training of Main Network")
-        print('=' * 108)
-        # FINETUNING TRAINING -- contains the epochs loop
-        super().train_loop(t, trn_loader, val_loader)
+                # calculate importance of auxiliary model
+                curr_importance = self.estimate_parameter_importance(self.model_aux, trn_loader)
+                for n in self.importance_aux.keys():
+                    self.importance_aux[n] = curr_importance[n]
 
-        # EXEMPLAR MANAGEMENT -- select training subset
-        self.exemplars_dataset.collect_exemplars(self.model, trn_loader, val_loader.dataset.transform)
+            print('=' * 108)
+            print("Training of Main Network")
+            print('=' * 108)
+            # FINETUNING TRAINING -- contains the epochs loop
+            super().train_loop(t, trn_loader, val_loader)
+
+            # EXEMPLAR MANAGEMENT -- select training subset
+            self.exemplars_dataset.collect_exemplars(self.model, trn_loader, val_loader.dataset.transform)
+
+            # Save model to re-use and avoid training each time during hyp-param search
+            torch.save(self.model.state_dict(), main_model_path)
 
     def post_train_process(self, t, trn_loader):
         """Runs after training all the epochs of the task (after the train session)"""

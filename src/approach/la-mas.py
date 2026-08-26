@@ -185,7 +185,7 @@ class Appr(Inc_Learning_Appr):
                                                         pin_memory=trn_loader.pin_memory)
             print("lamb : ", self.lamb[t])
             if t > 0:
-                # Load model if already trained (except when doing hyp-param search):
+                # Load model if already trained:
                 aux_model_path = self.save_models_imps_path+"_t"+str(t)+"_aux_model_state_dict"
                 if os.path.exists(aux_model_path):
                     self.model_aux = deepcopy(self.model)
