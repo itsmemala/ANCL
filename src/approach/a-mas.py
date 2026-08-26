@@ -143,11 +143,11 @@ class Appr(Inc_Learning_Appr):
                     new_trainer = NewTaskTrainer(self.model_aux, self.device, **new_trainer_args)
                     new_trainer.train_loop(t, trn_loader, val_loader)
 
-                    # Store parameter of auxiliary model to compute regularizer later
-                    self.auxiliary_params = {n: p.clone().detach() for n, p in self.model_aux.model.named_parameters() if p.requires_grad}
-
                     # save aux network to re-use and avoid training each time during hyp-param search
                     torch.save(self.model_aux.state_dict(), aux_model_path)
+
+                # Store parameter of auxiliary model to compute regularizer later
+                self.auxiliary_params = {n: p.clone().detach() for n, p in self.model_aux.model.named_parameters() if p.requires_grad}
 
                 # calculate importance of auxiliary model
                 curr_importance = self.estimate_parameter_importance(self.model_aux, trn_loader)
